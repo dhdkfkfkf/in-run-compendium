@@ -7,6 +7,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.math.MathUtils;
 import com.megacrit.cardcrawl.cards.AbstractCard;
 import com.megacrit.cardcrawl.cards.CardGroup;
 import com.megacrit.cardcrawl.core.CardCrawlGame;
@@ -421,14 +422,19 @@ public class CardCompendium implements PostUpdateSubscriber {
         selectedColor = color;
         currentGroup = group;
         sortGroup(currentGroup, sortKind, lastAscending);
-        currentDiffY = scrollLowerBound;
-        grabStartY = currentDiffY;
+
         grabbedScreen = false;
         hoveredCard = null;
         clickStartedCard = null;
-        justSorted = false;
+
+        // 和原版图鉴切颜色一样：**保留当前滚动位置**（越界部分由 resetScrolling 平滑回弹），
+        // 卡片用一点随机缩放落位，不硬跳回顶部。
+        for (AbstractCard card : group.group) {
+            card.drawScale = MathUtils.random(0.6F, 0.65F);
+            card.targetDrawScale = CARD_SCALE;
+        }
+        justSorted = true;
         calculateScrollBounds();
-        snapCards();
         updateBarPosition();
     }
 
