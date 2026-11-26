@@ -1,0 +1,12 @@
+# 构建产物
+build/
+dist/
+out/
+
+# 依赖 jar 从游戏目录读取，不进仓库
+lib/
+*.jar
+
+# 本地临时
+_tmp/
+*.log
