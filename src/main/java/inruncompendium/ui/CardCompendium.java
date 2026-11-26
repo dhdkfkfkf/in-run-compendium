@@ -1,6 +1,7 @@
 package inruncompendium.ui;
 
 import basemod.interfaces.PostUpdateSubscriber;
+import basemod.patches.com.megacrit.cardcrawl.screens.mainMenu.ColorTabBar.ColorTabBarFix;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -22,11 +23,12 @@ import com.megacrit.cardcrawl.helpers.input.InputHelper;
 import com.megacrit.cardcrawl.screens.MasterDeckViewScreen;
 import com.megacrit.cardcrawl.screens.SingleCardViewPopup;
 import com.megacrit.cardcrawl.screens.compendium.CardLibSortHeader;
-import com.megacrit.cardcrawl.screens.compendium.CardLibraryScreen;
+import com.megacrit.cardcrawl.screens.mainMenu.ColorTabBar;
 import com.megacrit.cardcrawl.screens.mainMenu.ScrollBar;
 import com.megacrit.cardcrawl.screens.mainMenu.ScrollBarListener;
 import com.megacrit.cardcrawl.screens.mainMenu.SortHeaderButton;
 import com.megacrit.cardcrawl.screens.mainMenu.SortHeaderButtonListener;
+import com.megacrit.cardcrawl.screens.mainMenu.TabBarListener;
 import inruncompendium.CompendiumConfig;
 import inruncompendium.ZixiuCompat;
 
@@ -34,50 +36,34 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
  * 局内卡牌图鉴：在任何局内界面查看所有已注册的卡牌（原版 + 各模组）。
  *
- * <p>交互和原版看牌界面（{@code CardLibraryScreen} / {@code MasterDeckViewScreen}）完全一致：
- * 按住空白 1:1 拖动、滚轮、原版滚动条、原版排序按钮（稀有度 / 类型 / 耗能 / A-Z，点一下切升降序）、
- * 原版「看升级版」勾选框、点卡开原版大图并可连续翻阅。
+ * <p>颜色分页直接用原版 {@link ColorTabBar} 组件（BaseMod 已经给它打过补丁：
+ * 模组颜色会自动多出 tab，颜色和名字都取模组注册的值），所以我们拿到的是和原版图鉴
+ * 完全一样的 tab 图、悬停/点击手感、排序条染色，以及「看升级版」勾选框。
  *
- * <p>内容按卡牌颜色分页：原版六色用原版本地化的名字，模组自定义颜色用枚举名（如 {@code Zixiu}）。
- * 颜色 tab 画在排序条上方，超过 12 个自动换行。
+ * <p>因为局内顶栏占了画面上方，卡墙整体比原版图鉴低一点（{@code 0.63 * HEIGHT} 起），
+ * 好让原版 tab 完整露在顶栏下面。
  *
- * <p>和字修的「字典」互斥：字修的配置里「字典」开着时，本模组自动隐藏（见 {@link ZixiuCompat}）。
+ * <p>交互照原版看牌界面：按住空白 1:1 拖动、滚轮、原版滚动条、原版排序按钮、点卡开大图。
  *
- * <p>可用时机和顶栏「牌组」按钮一致；打开时占用 {@code MASTER_DECK_VIEW} 屏幕格子，
- * 收起走原版 {@code closeCurrentScreen()}，顶栏地图 / 牌组 / 设置可以直接切走。
+ * <p>和字修的「字典」互斥：字修配置里「字典」开着时本模组自动隐藏（见 {@link ZixiuCompat}）。
  */
 public class CardCompendium implements PostUpdateSubscriber {
 
-    // ---- 布局（照抄 CardLibraryScreen / ColorTabBar） ----
+    // ---- 布局 ----
 
     private static final int COLS = 5;
     private static final float CARD_SCALE = 0.75F;
     private static final float HEADER_LIFT = 230.0F;
-    private static final float BAR_W = 1334.0F;
-    private static final float BAR_H = 102.0F;
+    /** 原版是 0.66；局内要低一点，给顶栏下的颜色 tab 留出完整高度。 */
+    private static final float GRID_TOP_RATIO = 0.63F;
 
     private static final float ICON_SIZE = 64.0F;
     private static final float ICON_SLOT_SPACING = 74.0F;
-
-    private static final float UPGRADE_HB_X = 1410.0F;
-    private static final float UPGRADE_HB_W = 360.0F;
-    private static final float UPGRADE_HB_H = 48.0F;
-    private static final float UPGRADE_LABEL_X = 1546.0F;
-    private static final float UPGRADE_BOX_X = 1532.0F;
-
-    /**
-     * 颜色列表放在卡墙左边一列（局内顶栏下方没有空间放原版那种横向 tab）。
-     * 每列最多 12 个，颜色多了就并排第二列。
-     */
-    private static final int COLOR_ROWS = 12;
-    private static final float COLOR_COL_W = 150.0F;
-    private static final float COLOR_ROW_H = 42.0F;
 
     private static float drawStartX;
     private static float drawStartY;
@@ -90,12 +76,9 @@ public class CardCompendium implements PostUpdateSubscriber {
     private static final List<AbstractCard.CardColor> COLORS = new ArrayList<AbstractCard.CardColor>();
     private static final Map<AbstractCard.CardColor, CardGroup> GROUPS =
             new LinkedHashMap<AbstractCard.CardColor, CardGroup>();
-    private static final Map<AbstractCard.CardColor, Color> BAR_COLORS =
-            new HashMap<AbstractCard.CardColor, Color>();
-    private static final List<Hitbox> TAB_HBS = new ArrayList<Hitbox>();
-    private static int tabIndex;
-    private static int totalCardCount;
+    private static AbstractCard.CardColor selectedColor;
     private static CardGroup currentGroup;
+    private static int totalCardCount;
 
     // ---- 滚动状态 ----
 
@@ -108,6 +91,7 @@ public class CardCompendium implements PostUpdateSubscriber {
 
     private static AbstractCard hoveredCard;
     private static AbstractCard clickStartedCard;
+    private static ColorTabBar colorBar;
     private static ScrollBar scrollBar;
     private static SortHeaderButton[] sortButtons;
     private static int[] sortKinds;
@@ -125,8 +109,6 @@ public class CardCompendium implements PostUpdateSubscriber {
     private static boolean wantOpen;
 
     private static final Hitbox ICON_HB = new Hitbox(ICON_SIZE, ICON_SIZE);
-    private static final Hitbox UPGRADE_HB = new Hitbox(UPGRADE_HB_W, UPGRADE_HB_H);
-
     private static Texture iconTexture;
     private static float iconAngle;
     private static float iconRotateTimer;
@@ -142,6 +124,13 @@ public class CardCompendium implements PostUpdateSubscriber {
         @Override
         public void didChangeOrder(SortHeaderButton button, boolean ascending) {
             CardCompendium.didChangeOrder(button, ascending);
+        }
+    };
+
+    private static final TabBarListener TAB_LISTENER = new TabBarListener() {
+        @Override
+        public void didChangeTab(ColorTabBar bar, ColorTabBar.CurrentTab tab) {
+            CardCompendium.changeTab(tab);
         }
     };
 
@@ -176,7 +165,6 @@ public class CardCompendium implements PostUpdateSubscriber {
         if (!CompendiumConfig.enabled()) {
             return false;
         }
-        // 字修自带字典开着时，这里让位（在字修里关掉字典即可用本模组）
         if (ZixiuCompat.suppressedByZixiu()) {
             return false;
         }
@@ -201,7 +189,6 @@ public class CardCompendium implements PostUpdateSubscriber {
         if (!canUseCompendium() || CardCrawlGame.isPopupOpen) {
             return;
         }
-        // 提前建好数据，悬浮说明里的总数才是准的
         buildData();
         updateLayout();
         updateIconHb();
@@ -250,12 +237,14 @@ public class CardCompendium implements PostUpdateSubscriber {
         if (COLORS.isEmpty()) {
             return;
         }
-        if (tabIndex >= COLORS.size()) {
-            tabIndex = 0;
-        }
         wantOpen = true;
         updateLayout();
-        currentGroup = GROUPS.get(COLORS.get(tabIndex));
+        buildWidgets();
+
+        if (selectedColor == null || !GROUPS.containsKey(selectedColor)) {
+            selectedColor = COLORS.get(0);
+        }
+        currentGroup = GROUPS.get(selectedColor);
         sortGroup(currentGroup, sortKind, lastAscending);
         calculateScrollBounds();
 
@@ -266,7 +255,6 @@ public class CardCompendium implements PostUpdateSubscriber {
         currentDiffY = scrollLowerBound;
         grabStartY = currentDiffY;
 
-        buildWidgets();
         snapCards();
         updateHeader();
 
@@ -319,7 +307,7 @@ public class CardCompendium implements PostUpdateSubscriber {
         clickStartedCard = null;
     }
 
-    // ---- 数据：所有颜色 + 每色一组卡 ----
+    // ---- 数据 ----
 
     private static void buildData() {
         if (dataBuilt) {
@@ -344,14 +332,13 @@ public class CardCompendium implements PostUpdateSubscriber {
         }
         totalCardCount = total;
 
-        // 原版六色按原版顺序排前面，自定义颜色按枚举名字母序
-        List<AbstractCard.CardColor> vanilla = new ArrayList<AbstractCard.CardColor>();
-        addIfPresent(vanilla, byColor, AbstractCard.CardColor.RED);
-        addIfPresent(vanilla, byColor, AbstractCard.CardColor.GREEN);
-        addIfPresent(vanilla, byColor, AbstractCard.CardColor.BLUE);
-        addIfPresent(vanilla, byColor, AbstractCard.CardColor.PURPLE);
-        addIfPresent(vanilla, byColor, AbstractCard.CardColor.COLORLESS);
-        addIfPresent(vanilla, byColor, AbstractCard.CardColor.CURSE);
+        List<AbstractCard.CardColor> ordered = new ArrayList<AbstractCard.CardColor>();
+        addIfPresent(ordered, byColor, AbstractCard.CardColor.RED);
+        addIfPresent(ordered, byColor, AbstractCard.CardColor.GREEN);
+        addIfPresent(ordered, byColor, AbstractCard.CardColor.BLUE);
+        addIfPresent(ordered, byColor, AbstractCard.CardColor.PURPLE);
+        addIfPresent(ordered, byColor, AbstractCard.CardColor.COLORLESS);
+        addIfPresent(ordered, byColor, AbstractCard.CardColor.CURSE);
 
         List<AbstractCard.CardColor> others = new ArrayList<AbstractCard.CardColor>();
         for (AbstractCard.CardColor color : byColor.keySet()) {
@@ -360,18 +347,15 @@ public class CardCompendium implements PostUpdateSubscriber {
             }
         }
         others.sort((a, b) -> a.name().compareTo(b.name()));
+        ordered.addAll(others);
 
         COLORS.clear();
-        COLORS.addAll(vanilla);
-        COLORS.addAll(others);
-
+        COLORS.addAll(ordered);
         for (AbstractCard.CardColor color : COLORS) {
             CardGroup group = new CardGroup(CardGroup.CardGroupType.UNSPECIFIED);
             group.group.addAll(byColor.get(color));
             sortGroup(group, SORT_TYPE, true);
             GROUPS.put(color, group);
-            BAR_COLORS.put(color, barColorFor(color));
-            TAB_HBS.add(new Hitbox(1.0F, 1.0F));
         }
     }
 
@@ -392,75 +376,49 @@ public class CardCompendium implements PostUpdateSubscriber {
                 || color == AbstractCard.CardColor.CURSE;
     }
 
-    private static Color barColorFor(AbstractCard.CardColor color) {
-        if (color == AbstractCard.CardColor.RED) {
-            return new Color(0.5F, 0.1F, 0.1F, 1.0F);
+    // ---- 颜色 tab：直接用原版 ColorTabBar ----
+
+    private static void changeTab(ColorTabBar.CurrentTab tab) {
+        AbstractCard.CardColor color = colorForTab(tab);
+        if (color != null) {
+            switchToColor(color);
         }
-        if (color == AbstractCard.CardColor.GREEN) {
-            return new Color(0.25F, 0.55F, 0.0F, 1.0F);
-        }
-        if (color == AbstractCard.CardColor.BLUE) {
-            return new Color(0.01F, 0.34F, 0.52F, 1.0F);
-        }
-        if (color == AbstractCard.CardColor.PURPLE) {
-            return new Color(0.37F, 0.22F, 0.49F, 1.0F);
-        }
-        if (color == AbstractCard.CardColor.COLORLESS) {
-            return new Color(0.4F, 0.4F, 0.4F, 1.0F);
-        }
-        if (color == AbstractCard.CardColor.CURSE) {
-            return new Color(0.18F, 0.18F, 0.16F, 1.0F);
-        }
-        return new Color(0.4F, 0.4F, 0.4F, 1.0F);
     }
 
-    private static String tabLabel(AbstractCard.CardColor color) {
-        if (color == AbstractCard.CardColor.RED) {
-            return CardLibraryScreen.TEXT[1];
+    private static AbstractCard.CardColor colorForTab(ColorTabBar.CurrentTab tab) {
+        if (tab == ColorTabBar.CurrentTab.RED) {
+            return AbstractCard.CardColor.RED;
         }
-        if (color == AbstractCard.CardColor.GREEN) {
-            return CardLibraryScreen.TEXT[2];
+        if (tab == ColorTabBar.CurrentTab.GREEN) {
+            return AbstractCard.CardColor.GREEN;
         }
-        if (color == AbstractCard.CardColor.BLUE) {
-            return CardLibraryScreen.TEXT[3];
+        if (tab == ColorTabBar.CurrentTab.BLUE) {
+            return AbstractCard.CardColor.BLUE;
         }
-        if (color == AbstractCard.CardColor.PURPLE) {
-            return CardLibraryScreen.TEXT[8];
+        if (tab == ColorTabBar.CurrentTab.PURPLE) {
+            return AbstractCard.CardColor.PURPLE;
         }
-        if (color == AbstractCard.CardColor.COLORLESS) {
-            return CardLibraryScreen.TEXT[4];
+        if (tab == ColorTabBar.CurrentTab.COLORLESS) {
+            return AbstractCard.CardColor.COLORLESS;
         }
-        if (color == AbstractCard.CardColor.CURSE) {
-            return CardLibraryScreen.TEXT[5];
+        if (tab == ColorTabBar.CurrentTab.CURSE) {
+            return AbstractCard.CardColor.CURSE;
         }
-        return prettyName(color.name());
+        // BaseMod 追加的「模组颜色」tab：枚举值是 MOD，点中的具体颜色存在它的静态列表里
+        if ("MOD".equals(tab.name())) {
+            ColorTabBarFix.ModColorTab modTab = ColorTabBarFix.Fields.getModTab();
+            return modTab == null ? null : modTab.color;
+        }
+        return null;
     }
 
-    private static String prettyName(String raw) {
-        String[] parts = raw.toLowerCase(Locale.ROOT).split("_");
-        StringBuilder sb = new StringBuilder();
-        for (String part : parts) {
-            if (part.isEmpty()) {
-                continue;
-            }
-            if (sb.length() > 0) {
-                sb.append(' ');
-            }
-            sb.append(Character.toUpperCase(part.charAt(0)));
-            if (part.length() > 1) {
-                sb.append(part.substring(1));
-            }
-        }
-        String name = sb.toString();
-        return name.length() > 12 ? name.substring(0, 11) + "…" : name;
-    }
-
-    private static void switchTab(int index) {
-        if (index == tabIndex || index < 0 || index >= COLORS.size()) {
+    private static void switchToColor(AbstractCard.CardColor color) {
+        CardGroup group = GROUPS.get(color);
+        if (group == null) {
             return;
         }
-        tabIndex = index;
-        currentGroup = GROUPS.get(COLORS.get(tabIndex));
+        selectedColor = color;
+        currentGroup = group;
         sortGroup(currentGroup, sortKind, lastAscending);
         currentDiffY = scrollLowerBound;
         grabStartY = currentDiffY;
@@ -588,7 +546,7 @@ public class CardCompendium implements PostUpdateSubscriber {
         }
     }
 
-    // ---- 顶栏：颜色 tab / 排序按钮 / 看升级版 ----
+    // ---- 顶栏：颜色 tab + 排序按钮 ----
 
     private static float headerY() {
         List<AbstractCard> cards = currentGroup == null ? null : currentGroup.group;
@@ -597,55 +555,13 @@ public class CardCompendium implements PostUpdateSubscriber {
         return topY + HEADER_LIFT * Settings.yScale;
     }
 
-    private static void updateTabs() {
-        if (TAB_HBS.isEmpty()) {
-            return;
-        }
-        int count = TAB_HBS.size();
-        int columns = Math.max(1, (count + COLOR_ROWS - 1) / COLOR_ROWS);
-        columns = Math.min(columns, 2);   // 最多两列，多了就把行距压紧（第三列会压到卡墙）
-        int rows = (count + columns - 1) / columns;
-        float rowH = Math.min(COLOR_ROW_H, 520.0F / Math.max(1, rows)) * Settings.scale;
-        float topY = Settings.HEIGHT - 170.0F * Settings.scale;
-        for (int i = 0; i < count; i++) {
-            int col = i / rows;
-            int row = i % rows;
-            Hitbox hb = TAB_HBS.get(i);
-            hb.width = COLOR_COL_W * Settings.scale;
-            hb.height = rowH;
-            hb.move(110.0F * Settings.scale + col * COLOR_COL_W * Settings.scale,
-                    topY - row * rowH);
-            hb.update();
-        }
-        if (InputHelper.justClickedLeft) {
-            for (int i = 0; i < count; i++) {
-                if (TAB_HBS.get(i).hovered) {
-                    switchTab(i);
-                    return;
-                }
-            }
-        }
-    }
-
     private static void updateHeader() {
-        updateTabs();
         float y = headerY();
+        // 原版 ColorTabBar：tab 的悬停/点击、模组颜色 tab、颜色条、看升级版勾选框全在里面
+        colorBar.update(y);
         for (SortHeaderButton button : sortButtons) {
             button.updateScrollPosition(y);
             button.update();
-        }
-
-        UPGRADE_HB.width = UPGRADE_HB_W * Settings.xScale;
-        UPGRADE_HB.height = UPGRADE_HB_H * Settings.scale;
-        UPGRADE_HB.move(UPGRADE_HB_X * Settings.xScale, y);
-        UPGRADE_HB.update();
-        if (UPGRADE_HB.hovered && InputHelper.justClickedLeft) {
-            UPGRADE_HB.clickStarted = true;
-        }
-        if (UPGRADE_HB.clicked) {
-            UPGRADE_HB.clicked = false;
-            SingleCardViewPopup.isViewingUpgrade = !SingleCardViewPopup.isViewingUpgrade;
-            CardCrawlGame.sound.playA("UI_CLICK_1", -0.2F);
         }
     }
 
@@ -725,8 +641,13 @@ public class CardCompendium implements PostUpdateSubscriber {
             return;
         }
         updateLayout();
-        renderTabs(sb);
-        renderHeader(sb);
+
+        float y = headerY();
+        colorBar.render(sb, y);
+        for (SortHeaderButton button : sortButtons) {
+            button.updateScrollPosition(y);
+            button.render(sb);
+        }
 
         currentGroup.renderInLibrary(sb);
         if (hoveredCard != null) {
@@ -740,65 +661,10 @@ public class CardCompendium implements PostUpdateSubscriber {
         }
     }
 
-    private static void renderTabs(SpriteBatch sb) {
-        for (int i = 0; i < TAB_HBS.size(); i++) {
-            Hitbox hb = TAB_HBS.get(i);
-            boolean active = i == tabIndex;
-            Color color = active || hb.hovered ? Settings.GOLD_COLOR : Settings.CREAM_COLOR;
-            FontHelper.renderFontCentered(sb, FontHelper.topPanelInfoFont,
-                    tabLabel(COLORS.get(i)), hb.cX, hb.cY, color);
-            if (active) {
-                sb.setColor(Settings.GOLD_COLOR);
-                sb.draw(ImageMaster.WHITE_SQUARE_IMG,
-                        hb.x - 6.0F * Settings.scale, hb.cY - 12.0F * Settings.scale,
-                        3.0F * Settings.scale, 24.0F * Settings.scale);
-                sb.setColor(Color.WHITE);
-            }
-        }
-    }
-
-    private static void renderHeader(SpriteBatch sb) {
-        float y = headerY();
-        for (SortHeaderButton button : sortButtons) {
-            button.updateScrollPosition(y);
-        }
-
-        sb.setColor(BAR_COLORS.get(COLORS.get(tabIndex)));
-        sb.draw(ImageMaster.COLOR_TAB_BAR,
-                Settings.WIDTH / 2.0F - BAR_W * Settings.scale / 2.0F,
-                y - BAR_H * Settings.scale / 2.0F,
-                BAR_W * Settings.scale, BAR_H * Settings.scale);
-        sb.setColor(Color.WHITE);
-
-        for (SortHeaderButton button : sortButtons) {
-            button.render(sb);
-        }
-        renderViewUpgrade(sb, y);
-    }
-
-    private static void renderViewUpgrade(SpriteBatch sb, float y) {
-        String label = CardLibraryScreen.TEXT[7];
-        Color color = UPGRADE_HB.hovered ? Settings.GOLD_COLOR : Settings.CREAM_COLOR;
-        FontHelper.renderFontRightAligned(sb, FontHelper.topPanelInfoFont, label,
-                UPGRADE_LABEL_X * Settings.xScale, y, color);
-
-        Texture box = SingleCardViewPopup.isViewingUpgrade
-                ? ImageMaster.COLOR_TAB_BOX_TICKED
-                : ImageMaster.COLOR_TAB_BOX_UNTICKED;
-        float textWidth = FontHelper.getSmartWidth(
-                FontHelper.topPanelInfoFont, label, 9999.0F, 0.0F);
-        sb.setColor(color);
-        sb.draw(box,
-                UPGRADE_BOX_X * Settings.xScale - textWidth - 24.0F * Settings.scale,
-                y - 24.0F * Settings.scale,
-                48.0F * Settings.scale, 48.0F * Settings.scale);
-        sb.setColor(Color.WHITE);
-    }
-
     // ---- 布局 ----
 
     private static void updateLayout() {
-        drawStartY = Settings.HEIGHT * 0.66F;
+        drawStartY = Settings.HEIGHT * GRID_TOP_RATIO;
         float w = AbstractCard.IMG_WIDTH * CARD_SCALE;
         padX = w + Settings.CARD_VIEW_PAD_X;
         padY = AbstractCard.IMG_HEIGHT * CARD_SCALE + Settings.CARD_VIEW_PAD_Y;
@@ -808,7 +674,7 @@ public class CardCompendium implements PostUpdateSubscriber {
     }
 
     private static void updateIconHb() {
-        float slot = (ICON_SIZE + 10.0F) * Settings.scale;
+        float slot = (ICON_SIZE + ICON_SLOT_SPACING) * Settings.scale;
         ICON_HB.width = ICON_SIZE * Settings.scale;
         ICON_HB.height = ICON_SIZE * Settings.scale;
         ICON_HB.move(Settings.WIDTH - slot * 4.0F + ICON_SIZE * Settings.scale / 2.0F,
@@ -843,6 +709,10 @@ public class CardCompendium implements PostUpdateSubscriber {
     }
 
     private static void buildWidgets() {
+        // ColorTabBar 只建一次：它自己记着选中的 tab（含 BaseMod 的模组颜色 tab），重开图鉴能保持
+        if (colorBar == null) {
+            colorBar = new ColorTabBar(TAB_LISTENER);
+        }
         scrollBar = new ScrollBar(BAR_LISTENER);
         scrollBar.move(0.0F, -30.0F * Settings.scale);
 
