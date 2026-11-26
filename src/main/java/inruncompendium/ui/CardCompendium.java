@@ -63,7 +63,8 @@ public class CardCompendium implements PostUpdateSubscriber {
     private static final float GRID_TOP_RATIO = 0.63F;
 
     private static final float ICON_SIZE = 64.0F;
-    private static final float ICON_SLOT_SPACING = 74.0F;
+    /** 原版顶栏按钮之间的空隙（每个格子 = 64 + 10）。 */
+    private static final float ICON_SLOT_GAP = 10.0F;
 
     private static float drawStartX;
     private static float drawStartY;
@@ -674,7 +675,7 @@ public class CardCompendium implements PostUpdateSubscriber {
     }
 
     private static void updateIconHb() {
-        float slot = (ICON_SIZE + ICON_SLOT_SPACING) * Settings.scale;
+        float slot = (ICON_SIZE + ICON_SLOT_GAP) * Settings.scale;
         ICON_HB.width = ICON_SIZE * Settings.scale;
         ICON_HB.height = ICON_SIZE * Settings.scale;
         ICON_HB.move(Settings.WIDTH - slot * 4.0F + ICON_SIZE * Settings.scale / 2.0F,
