@@ -46,7 +46,7 @@ public class InRunCompendium implements PostInitializeSubscriber {
         panel.addUIElement(toggle);
 
         BaseMod.registerModBadge(
-                ImageMaster.loadImage("inruncompendium/images/ui/book.png"),
+                ImageMaster.loadImage("inruncompendium/images/ui/badge.png"),
                 "局内卡牌图鉴", "dhdkfkfkf",
                 "局内查看所有卡牌的图鉴，布局与手感照原版看牌界面。", panel);
     }
