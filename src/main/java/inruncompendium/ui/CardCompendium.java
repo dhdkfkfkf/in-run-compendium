@@ -201,6 +201,8 @@ public class CardCompendium implements PostUpdateSubscriber {
         if (!canUseCompendium() || CardCrawlGame.isPopupOpen) {
             return;
         }
+        // 提前建好数据，悬浮说明里的总数才是准的
+        buildData();
         updateLayout();
         updateIconHb();
         updateIconAngle();
